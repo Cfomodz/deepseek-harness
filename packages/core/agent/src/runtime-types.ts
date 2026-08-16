@@ -64,7 +64,12 @@ export type SessionStartSource = 'startup' | 'resume' | 'clear' | 'compact'
 export interface Agent {
   /** The single identity shared with {@link session}. */
   readonly id: SessionId
-  /** The provider route and model this agent's requests use. */
+  /**
+   * The creation seed declared at `create()`/`resume()`, not the route in
+   * force: a deployment that moves the route through the `agent/request`
+   * waterfall never writes back here. Read `session.requestHeader()?.config`
+   * for the route the latest request actually used.
+   */
   readonly options: AgentOptions
   /** The live session this agent drives; its log is the durable source of truth. */
   readonly session: Session

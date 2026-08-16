@@ -44,6 +44,8 @@ subagent seam 允许一个 agent（智能体）通过具名提供方把工作委
 
 `childSessionMeta()` 把所加入的 preset id 记在子 agent 的持久化 header 上，理由与顶层会话记录自己的那一个相同：preset 决定了模型所见的工具 schema 与提示段，因此冷读子 agent 的历史时必须重建那份组装，而不是部署默认值。该值从父方**活着的** scope 链读取，而不是从父方 header 读取，因为在空白期切换过 preset 的父方运行在更新的那份组装上，而它的 header 仍写着旧的那个。
 
+`resolveChildAgentOptions()` 继承的是父 agent 最近一次请求实际使用的路由——即 `session.requestHeader()?.config`——只有当父 agent 从未发出过请求时才回退到 `parent.options`，而显式的每次调用 `agentOptions` 位于最外层。`Agent.options` 是 create/resume 时声明的种子，而不是当前生效的路由：像模型选择器那样通过 `agent/request` waterfall 改变路由的部署，从不写回它。改为读取日志，才能让子 agent 保持在父 agent 当前的 provider 上；而 provider id 除了选定模型，还选定凭据与端点，因此继承一个陈旧的 provider 会向另一个账户认证，且没有报错、也没有任何用户可见的信号（[Agent Note](../../../.agents/notes/implemented/bug-fix/2026-08-16-subagents-inherit-the-parents-live-route.md)）。adapter 提供的 `maxTokens` 被排除在外：`adapterDefaults` 标记的是"调用方未提供、由精确模型的 adapter 解析出来"的上限，把它提升会让子 agent 在此后运行的每一个模型上都被钉死在该 adapter 的默认值上。可继续启动只解析一次，并由这一个值同时导出子 agent 的选项与其持久化 descriptor，因此冷恢复重建出来的正是该子 agent 实际启动时所用的路由。
+
 可继续创建对应可选的 `SubagentProvider.prepareContinuable?()` 方法：方法是否存在就是能力检查，因此服务会在没有该方法的提供方上拒绝已配置的可继续启动，而具备该方法的提供方仍可服务普通一次性委派。该方法只返回已分离的 `ContinuableCreateSpec`（`{ seed? }`）。它只是数据，不携带任何能力：不包含 Agent、`AgentHandle`、提示词投递、结果、dispose 或恢复操作。准备完成后，身份预留、组合、Agent 创建、提示词投递、冷恢复、所有权和 dispose 均由继续执行管理器负责。一次性 `SubagentRun` 表示一次可 dispose 的前台委派，只有一个结果，且没有冷恢复操作。服务可以针对不同的同级子 agent 并发调用同一提供方：每次启动或准备都拥有各自的可变状态和取消路径，一项操作的失败、结果或清理不得使另一项操作结算或释放。提供方可以在内部按自身容量排队，但不得改变这项独立性约定。
 
 ## 持久化描述符

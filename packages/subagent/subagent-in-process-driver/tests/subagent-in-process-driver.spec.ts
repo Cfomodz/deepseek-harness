@@ -1,5 +1,5 @@
 import { CallId, createUserMessage } from '@deepseek-ai/dsh-llm'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { type Agent, type AgentOptions } from '@deepseek-ai/dsh-agent'
 import { SessionId } from '@deepseek-ai/dsh-session'
@@ -47,6 +47,19 @@ function request(parent: Agent, signal = new AbortController().signal) {
       label: 'child task',
     }),
   }
+}
+
+/**
+ * Drive one parent turn to completion, so the route it actually used reaches
+ * its log as a `request/header` — the state a delegation reads.
+ */
+async function driveOneTurn(agent: Agent): Promise<void> {
+  agent.followup(createUserMessage({
+    content: [{ type: 'text' as const, text: 'parent work' }],
+    source: { kind: 'user' },
+  }))
+  await vi.waitFor(() => { expect(agent.session.requestHeader()).toBeDefined() })
+  await vi.waitFor(() => { expect(agent.status).toBe('idle') })
 }
 
 function text(blocks: readonly { type: string; text?: string }[]): string {
@@ -310,6 +323,84 @@ describe('startInProcessRun', () => {
     expect(child.options).toEqual({ subagentDepth: 1 })
     await expect(run.result).resolves.toMatchObject({ stopReason: 'error' })
     await run.dispose()
+  })
+
+  it('inherits the route the parent last requested on, not its creation seed', async () => {
+    // A deployment that moves the route through the `agent/request` waterfall —
+    // every Web host does, for its model picker — never writes back to
+    // `Agent.options`, so a parent that switched model keeps naming the default
+    // it was created under. The child follows the parent's logged route: a
+    // provider id also selects the credential and endpoint, so inheriting a
+    // stale one bills a different account with no error and no UI signal.
+    const { ctx, parent, adapter } = await setup([])
+    const billed = new MockAdapter([textResponse('parent answer'), textResponse('child answer')])
+    ctx.llm.registerAdapter(['billed'], billed)
+    parent.ctx.on('agent/request', async (_payload, next) => ({
+      ...await next(),
+      provider: 'billed',
+      model: 'billed-model',
+    }))
+    await driveOneTurn(parent)
+
+    expect(parent.options).toMatchObject({ provider: 'mock', model: 'mock' })
+    expect(parent.session.requestHeader()?.config)
+      .toMatchObject({ provider: 'billed', model: 'billed-model' })
+
+    const run = await startInProcessRun(request(parent), {})
+    const child = ctx.agents.get(run.id)!
+    expect(child.options).toMatchObject({ provider: 'billed', model: 'billed-model' })
+    await run.result
+    // The child's own header is the audit authority for which account paid:
+    // both the parent's turn and the child's reached the switched route, and
+    // the creation-seed adapter was never called.
+    expect(child.session.requestHeader()?.config)
+      .toMatchObject({ provider: 'billed', model: 'billed-model' })
+    expect(billed.requests).toHaveLength(2)
+    expect(adapter.requests).toHaveLength(0)
+    await run.dispose()
+  })
+
+  it('lets an explicit request route override the parent live route', async () => {
+    const { ctx, parent } = await setup([textResponse('parent answer'), textResponse('child answer')])
+    parent.ctx.on('agent/request', async (_payload, next) => ({ ...await next(), model: 'live-model' }))
+    await driveOneTurn(parent)
+
+    const run = await startInProcessRun({
+      ...request(parent),
+      agentOptions: { provider: 'mock', model: 'requested-model' },
+    }, {})
+    expect(ctx.agents.get(run.id)!.options).toMatchObject({ provider: 'mock', model: 'requested-model' })
+    await run.result
+    await run.dispose()
+  })
+
+  it('carries an explicit parent maxTokens but not an adapter-resolved one', async () => {
+    // `adapterDefaults.maxTokens` marks a ceiling the exact-model adapter chose
+    // because the caller supplied none. Promoting it into the child's explicit
+    // options would pin the child to one adapter's default for every later
+    // model it runs; an explicit parent ceiling is never marked and does carry.
+    const { ctx } = await setup([])
+    const capped = new MockAdapter([textResponse('a'), textResponse('b')], undefined, 4096)
+    ctx.llm.registerAdapter(['capped'], capped)
+
+    const inherited = ctx.agentLoop.create(SessionId('adapter-capped'), { provider: 'capped', model: 'capped-model' })
+    await driveOneTurn(inherited)
+    expect(inherited.session.requestHeader()?.adapterDefaults?.maxTokens).toBe(true)
+    const inheritedRun = await startInProcessRun(request(inherited), {})
+    expect(ctx.agents.get(inheritedRun.id)!.options.maxTokens).toBeUndefined()
+    await inheritedRun.result
+    await inheritedRun.dispose()
+
+    const explicit = ctx.agentLoop.create(
+      SessionId('explicitly-capped'),
+      { provider: 'capped', model: 'capped-model', maxTokens: 128 },
+    )
+    await driveOneTurn(explicit)
+    expect(explicit.session.requestHeader()?.adapterDefaults?.maxTokens).toBeUndefined()
+    const explicitRun = await startInProcessRun(request(explicit), {})
+    expect(ctx.agents.get(explicitRun.id)!.options.maxTokens).toBe(128)
+    await explicitRun.result
+    await explicitRun.dispose()
   })
 
   it('uses the request signal after publication and dispose as cancellation paths', async () => {

@@ -57,9 +57,47 @@ export function resolveChildDepth(parent: Agent, maxDepth: number | undefined): 
 }
 
 /**
- * Resolve the child's `AgentOptions`: the parent's provider/model/maxTokens
+ * The route the parent's requests actually use: the config of its latest
+ * logged `request/header`, falling back to its creation options only for a
+ * parent that has never issued a request.
+ *
+ * `Agent.options` is the seed declared at create/resume, not the route in
+ * force. A deployment that installs a request-level model selection — every
+ * Web host does, through the `agent/request` waterfall — moves the route
+ * without ever writing back to the options, so a parent that switched model
+ * runs on one route while its options still name the deployment default of
+ * the moment it was created.
+ *
+ * Adapter-owned `maxTokens` is not inherited: that flag marks a value the
+ * exact-model adapter resolved because the caller supplied none, so promoting
+ * it into a child's explicit options would pin the child to one adapter's
+ * default for every later model it runs. An explicit parent `maxTokens` is
+ * never marked and therefore does carry.
+ * @param parent - the delegating parent whose route the child inherits.
+ * @returns the parent's live provider/model/maxTokens route.
+ */
+function parentRouteOf(parent: Agent): AgentOptions {
+  const header = parent.session.requestHeader()
+  if (header === undefined) return parent.options
+  const { provider, model, maxTokens } = header.config
+  return {
+    provider,
+    model,
+    ...maxTokens !== undefined && header.adapterDefaults?.maxTokens !== true ? { maxTokens } : {},
+  }
+}
+
+/**
+ * Resolve the child's `AgentOptions`: the parent's live provider/model/maxTokens
  * route unless the request overrides it, stamped with the child's own
  * delegation depth.
+ *
+ * The route comes from the parent's log rather than from its creation options,
+ * for the reason {@link childSessionMeta} reads the live preset rather than the
+ * parent header: the delegating parent's current state is what the child is
+ * meant to continue. Because a provider id also selects the credential and
+ * endpoint that authenticate the call, inheriting a stale one bills a different
+ * account with no error and no user-visible signal.
  * @param parent - the delegating parent whose route the child inherits.
  * @param requested - per-child overrides, if any.
  * @param childDepth - the resolved delegation depth to stamp.
@@ -70,13 +108,11 @@ export function resolveChildAgentOptions(
   requested: AgentOptions | undefined,
   childDepth: number,
 ): AgentOptions {
-  const parentProvider = parent.options.provider
-  const parentModel = parent.options.model
-  const parentMaxTokens = parent.options.maxTokens
+  const { provider, model, maxTokens } = parentRouteOf(parent)
   return {
-    ...parentProvider !== undefined ? { provider: parentProvider } : {},
-    ...parentModel !== undefined ? { model: parentModel } : {},
-    ...parentMaxTokens !== undefined ? { maxTokens: parentMaxTokens } : {},
+    ...provider !== undefined ? { provider } : {},
+    ...model !== undefined ? { model } : {},
+    ...maxTokens !== undefined ? { maxTokens } : {},
     ...requested,
     subagentDepth: childDepth,
   }

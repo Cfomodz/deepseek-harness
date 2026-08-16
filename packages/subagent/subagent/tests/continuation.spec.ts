@@ -2278,6 +2278,25 @@ describe('continuable errors', () => {
     await waitNoActivation(ctx, started.childId)
   })
 
+  it('records the parent live route in the durable descriptor', async () => {
+    // The descriptor is what a cold resume rebuilds `agentOptions` from, so a
+    // stale route recorded here outlives the process: every later resume of
+    // this child, and every grandchild it delegates, inherits the wrong one.
+    const { ctx, parent } = await setup([textResponse('parent answer'), textResponse('child answer')])
+    parent.ctx.on('agent/request', async (_payload, next) => ({ ...await next(), model: 'live-model' }))
+    parent.followup(createUserMessage({ content: message('parent work'), source: { kind: 'user' } }))
+    await vi.waitFor(() => { expect(parent.session.requestHeader()).toBeDefined() })
+    await vi.waitFor(() => { expect(parent.status).toBe('idle') })
+    expect(parent.options.model).toBe('mock')
+    parkParent(ctx, parent)
+
+    const started = await ctx.subagents.startContinuable(startSpec(parent))
+    await waitNoActivation(ctx, started.childId)
+    const loaded = await ctx.sessionPersistence.load(started.childId)
+    expect(loaded.events.find(event => event.type === 'subagent/descriptor')?.data)
+      .toMatchObject({ agentProvider: 'mock', agentModel: 'live-model' })
+  })
+
   it('unloading the manager drains its live activations', async () => {
     const hold = Promise.withResolvers<undefined>()
     const adapter = new GatedAdapter([{ chunks: textResponse('child'), gate: hold.promise }])

@@ -408,10 +408,16 @@ export class SubagentContinuationManager {
     assertSubagentMaxDepth(request.maxDepth)
     const childId = SessionId(randomUUID())
     const childDepth = resolveChildDepth(parent, request.maxDepth)
+    // Resolve before the first await, for the same reason the delegated policy
+    // below is captured there: the route belongs to the parent as it stands at
+    // delegation, not as it stands whenever materialization gets a lock. One
+    // resolution feeds both the child's options and the durable descriptor, so
+    // a cold resume rebuilds the route the child actually started on.
+    const childAgentOptions = resolveChildAgentOptions(parent, request.agentOptions, childDepth)
     // Snapshot before any await: invalid descriptor JSON rejects the call
     // before a child exists, and the detached value is what reaches the log.
-    const agentProvider = request.agentOptions?.provider ?? parent.options.provider
-    const agentModel = request.agentOptions?.model ?? parent.options.model
+    const agentProvider = childAgentOptions.provider
+    const agentModel = childAgentOptions.model
     const descriptor = snapshotSubagentDescriptor({
       mode: 'continuable',
       provider: spec.provider,
@@ -441,7 +447,7 @@ export class SubagentContinuationManager {
         provider: spec.provider,
         parent,
         create: { seed, meta: childSessionMeta(parent, childDepth, lineageSeedLength), delegatedPolicies },
-        agentOptions: resolveChildAgentOptions(parent, request.agentOptions, childDepth),
+        agentOptions: childAgentOptions,
         composition: { persona: request.persona, toolFilter: request.toolFilter },
         signal: spec.signal,
       })
