@@ -27,6 +27,29 @@ Researched at `47f943859` (0.1.0-rc.5 tree; most reporters were on rc.5 or rc.6)
 | [2392](2392.md) | `single slot 'details' already has a registration at priority 0` | Insufficient data on the trigger; invariant and fix class confirmed |
 | [2363](2363.md) | A submitted API key is silently dropped | Reporter's mechanism refuted; launch-environment shadowing is the likely cause |
 
+## Plugin feedback
+
+Peer reviews of plugins shared in the upstream `Show Your Plugins!` threads, chosen because each sits on a seam these notes already cover. Same structure and labelling, plus an explicit note on what was and was not read — plugin source is downloaded and read, never cloned, installed, or executed.
+
+| Thread | Plugin | Headline |
+|---|---|---|
+| [2564](2564.md) | six-plugin suite (Wang-Lin-Chang) | Default `remind` schedules can never fire; `createdBy` is hardcoded undefined |
+| [2532](2532.md) | dsh-session-sync | Each push deletes the other device's sessions; credentials in a remote URL reach the model |
+| [2471](2471.md) | dsh-file-undo | The pre-write content they believe is discarded is available at `tools/post-execute` |
+| [2472](2472.md) | dsh-permission-rules | Enforces at the real gate; `paths` rules silently drop out-of-workspace paths, so the baseline's `**/.ssh/**` misses `~/.ssh` |
+| [2553](2553.md) | dsh-budget | One global provider/model pair means concurrent sessions cross-price each other |
+| [2549](2549.md) | dsh-defend | No runtime fetching at all; `pwsh` missing from the delete guard's tool list while every rule is PowerShell |
+| [2487](2487.md) | dsh-background-agents | Exposed to the subagent route defect in its restart-surviving form |
+| [2492](2492.md) | dsh-checkpoint-rewind | Cleared of the corruption it looked exposed to; its own event gate is silently inactive |
+
+### The custom-session-event trap
+
+Five of these reviews land on one harness gap, and no single plugin author can see it from outside.
+
+`Session.append` reads only `sourceEventSeqs` and `surfaceOp` from its options, so a plugin cannot mark its own event `ignorable`. `KNOWN_SESSION_EVENT_TYPES` is generated from in-repo sources, and `declare module` merging has no runtime effect, so an out-of-repo event type is unknown by construction. The persistence write path accepts unknown types deliberately; the read path throws on them. A plugin that appends a custom event can therefore leave a session that refuses to cold-resume.
+
+Two authors defended against this with a probe that cannot succeed, one passes an `ignorable` flag that is discarded, and one appends unmarked events. The mechanism is confirmed line by line; the end-to-end trigger is not reproduced, so it stays PLAUSIBLE until someone does. It is worth a write-up of its own rather than a note in eight separate plugin threads.
+
 ## Method
 
 Three habits earned their keep and are worth repeating.
