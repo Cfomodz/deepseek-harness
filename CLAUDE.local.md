@@ -22,7 +22,8 @@ Participating in upstream discussions as one community member: reading reports, 
 
 The bar for anything drafted here is that a stranger could verify it without trusting us:
 
-- **Cite the source.** `path:line` against a stated commit, or a link. Say which commit or release was read; this fork can lag upstream.
+- **Cite the source.** `path:line` against a stated commit, or a link. Say which commit or release was read; this fork can lag upstream — check `upstream/master` before claiming a defect is unfixed.
+- **Link upstream threads by full URL**, never a bare `#1234`. GitHub resolves `#1234` against whatever repository renders it, so in this fork it points at our own issues, and even upstream it would resolve to an issue or pull request rather than the discussion, which numbers separately. Write `https://github.com/deepseek-ai/deepseek-harness/discussions/1234`.
 - **Separate what was verified from what was inferred.** Label confirmed, plausible, and unverified claims differently, and say what could not be checked and why. Never present a summarizer's paraphrase as a quotation.
 - **Verify commands and tools before recommending them.** Several plausible-sounding commands circulating in that repo's threads do not exist. Confirm a command is real, and prefer one that ships in-tree over a third-party tool — never recommend anything that fetches or updates itself at runtime.
 - **Correcting a reporter's own diagnosis is a good outcome**, when the correct alternative explanation comes with it. So is "this cannot be determined from what is posted; here are the two facts needed".
